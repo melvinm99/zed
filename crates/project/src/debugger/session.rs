@@ -3,11 +3,11 @@ use super::breakpoint_store::{
 };
 use super::dap_command::{
     self, Attach, ConfigurationDone, ContinueCommand, DataBreakpointInfoCommand, DisconnectCommand,
-    EvaluateCommand, Initialize, Launch, LoadedSourcesCommand, LocalDapCommand, LocationsCommand,
-    ModulesCommand, NextCommand, PauseCommand, RestartCommand, RestartStackFrameCommand,
-    ScopesCommand, SetDataBreakpointsCommand, SetExceptionBreakpoints, SetVariableValueCommand,
-    StackTraceCommand, StepBackCommand, StepCommand, StepInCommand, StepOutCommand,
-    TerminateCommand, TerminateThreadsCommand, ThreadsCommand, VariablesCommand,
+    EvaluateCommand, HotReloadCommand, HotRestartCommand, Initialize, Launch, LoadedSourcesCommand,
+    LocalDapCommand, LocationsCommand, ModulesCommand, NextCommand, PauseCommand, RestartCommand,
+    RestartStackFrameCommand, ScopesCommand, SetDataBreakpointsCommand, SetExceptionBreakpoints,
+    SetVariableValueCommand, StackTraceCommand, StepBackCommand, StepCommand, StepInCommand,
+    StepOutCommand, TerminateCommand, TerminateThreadsCommand, ThreadsCommand, VariablesCommand,
 };
 use super::dap_store::DapStore;
 use crate::debugger::breakpoint_store::BreakpointSessionState;
@@ -2209,6 +2209,22 @@ impl Session {
             })
             .ok();
         }));
+    }
+
+    pub fn hot_reload(&mut self, cx: &mut Context<Self>) {
+        if self.as_running().is_none() {
+            return;
+        }
+        self.request(HotReloadCommand, |_this, _result, _cx| None, cx)
+            .detach();
+    }
+
+    pub fn hot_restart(&mut self, cx: &mut Context<Self>) {
+        if self.as_running().is_none() {
+            return;
+        }
+        self.request(HotRestartCommand, |_this, _result, _cx| None, cx)
+            .detach();
     }
 
     pub fn shutdown(&mut self, cx: &mut Context<Self>) -> Task<()> {
