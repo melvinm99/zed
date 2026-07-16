@@ -15,6 +15,7 @@ use std::{
 use crate::{
     ToggleExpandItem,
     attach_modal::{AttachModal, ModalIntent},
+    flutter_device_modal::FlutterDeviceModal,
     new_process_modal::resolve_path,
     persistence::{self, DebuggerPaneItem, SerializedLayout},
     session::running::memory_view::MemoryView,
@@ -1103,6 +1104,46 @@ impl RunningState {
                 };
 
                 Self::substitute_process_id_in_config(&mut config, process_id);
+            }
+
+            // ponytail: string match mirrors the private `FlutterDebugAdapter::ADAPTER_NAME`
+            // constant in dap_adapters::flutter (not reachable cross-crate); same pattern as
+            // debugger_panel.rs's `is_flutter_adapter` check.
+            let has_device_id = config
+                .get("deviceId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.is_empty());
+
+            if adapter == "Flutter" && !has_device_id {
+                match crate::flutter_device_modal::list_flutter_devices().await {
+                    Ok(mut devices) if devices.len() == 1 => {
+                        config["deviceId"] = devices.remove(0).id.into();
+                    }
+                    Ok(devices) if devices.len() > 1 => {
+                        let (tx, rx) = futures::channel::oneshot::channel::<Option<String>>();
+                        let candidates: Arc<[_]> = devices.into();
+
+                        weak_workspace.update_in(cx, |workspace, window, cx| {
+                            workspace.toggle_modal(window, cx, |window, cx| {
+                                FlutterDeviceModal::new(candidates, tx, window, cx)
+                            });
+                        }).ok();
+
+                        if let Some(device_id) = rx.await.ok().flatten() {
+                            config["deviceId"] = device_id.into();
+                        }
+                    }
+                    Ok(_) => {
+                        log::warn!(
+                            "`flutter devices --machine` returned no devices; launching without a deviceId"
+                        );
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "failed to list Flutter devices, launching without a deviceId: {err}"
+                        );
+                    }
+                }
             }
 
             let request_type = match dap_registry

@@ -18,6 +18,7 @@ use zed_actions::debug_panel::{Toggle, ToggleFocus};
 pub mod attach_modal;
 pub mod debugger_panel;
 mod dropdown_menus;
+mod flutter_device_modal;
 mod new_process_modal;
 mod persistence;
 pub(crate) mod session;
