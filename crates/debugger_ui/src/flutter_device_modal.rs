@@ -20,13 +20,25 @@ pub(crate) struct FlutterDevice {
 
 /// Runs `flutter devices --machine` and parses the resulting JSON array.
 ///
+/// `env` should be the worktree's shell environment (in particular its shell
+/// `PATH`) so that a bare `flutter` can be resolved even when this process's
+/// own environment doesn't have it — e.g. a macOS `.app` launched from Finder
+/// doesn't inherit the user's shell `PATH`. Pass `None` to fall back to the
+/// process's own environment.
+///
 /// Callers should treat any error (command not found, non-zero exit, bad JSON)
 /// as "skip device selection" rather than a fatal condition — launching a
 /// Flutter session without a `deviceId` is a valid fallback that `flutter run`
 /// / the adapter handles on its own.
-pub(crate) async fn list_flutter_devices() -> Result<Vec<FlutterDevice>> {
-    let output = util::command::new_command("flutter")
-        .args(["devices", "--machine"])
+pub(crate) async fn list_flutter_devices(
+    env: Option<collections::HashMap<String, String>>,
+) -> Result<Vec<FlutterDevice>> {
+    let mut command = util::command::new_command("flutter");
+    command.args(["devices", "--machine"]);
+    if let Some(env) = env {
+        command.envs(env);
+    }
+    let output = command
         .output()
         .await
         .context("failed to run `flutter devices --machine`")?;

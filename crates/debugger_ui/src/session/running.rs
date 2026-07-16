@@ -1069,6 +1069,11 @@ impl RunningState {
             .remote_client()
             .as_ref()
             .and_then(|remote| remote.read(cx).shell());
+        // Resolved for the Flutter device picker below: `flutter` is spawned via
+        // its bare name, and a macOS `.app` launched from Finder doesn't inherit
+        // the user's shell PATH, so it needs the worktree's shell environment.
+        let flutter_worktree = worktree_id.and_then(|id| project.read(cx).worktree_for_id(id, cx));
+        let flutter_environment = project.read(cx).environment().clone();
 
         cx.spawn_in(window, async move |this, cx| {
             let DebugScenario {
@@ -1115,7 +1120,18 @@ impl RunningState {
                 .is_some_and(|id| !id.is_empty());
 
             if adapter == "Flutter" && !has_device_id {
-                match crate::flutter_device_modal::list_flutter_devices().await {
+                let flutter_env = match flutter_worktree {
+                    Some(worktree) => {
+                        flutter_environment
+                            .update(cx, |environment, cx| {
+                                environment.worktree_environment(worktree, cx)
+                            })
+                            .await
+                    }
+                    None => None,
+                };
+
+                match crate::flutter_device_modal::list_flutter_devices(flutter_env).await {
                     Ok(mut devices) if devices.len() == 1 => {
                         config["deviceId"] = devices.remove(0).id.into();
                     }
