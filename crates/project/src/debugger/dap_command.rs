@@ -1973,3 +1973,104 @@ impl LocalDapCommand for dap::WriteMemoryArguments {
         Ok(message)
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct HotReloadArguments {
+    pub reason: String,
+}
+
+/// Flutter custom DAP request: injects changed sources and rebuilds the widget tree.
+pub(crate) enum HotReloadRequest {}
+impl dap::requests::Request for HotReloadRequest {
+    const COMMAND: &'static str = "hotReload";
+    type Arguments = HotReloadArguments;
+    type Response = serde_json::Value; // permissive: empty body -> Null
+}
+
+/// Flutter custom DAP request: full restart (state not preserved).
+pub(crate) enum HotRestartRequest {}
+impl dap::requests::Request for HotRestartRequest {
+    const COMMAND: &'static str = "hotRestart";
+    type Arguments = HotReloadArguments;
+    type Response = serde_json::Value;
+}
+
+#[derive(Debug, Hash, PartialEq, Eq)]
+pub(crate) struct HotReloadCommand;
+
+impl Default for HotReloadCommand {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl LocalDapCommand for HotReloadCommand {
+    type Response = <HotReloadRequest as dap::requests::Request>::Response;
+    type DapRequest = HotReloadRequest;
+
+    fn to_dap(&self) -> <Self::DapRequest as dap::requests::Request>::Arguments {
+        HotReloadArguments {
+            reason: "manual".to_string(),
+        }
+    }
+
+    fn response_from_dap(
+        &self,
+        message: <Self::DapRequest as dap::requests::Request>::Response,
+    ) -> Result<Self::Response> {
+        Ok(message)
+    }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq)]
+pub(crate) struct HotRestartCommand;
+
+impl Default for HotRestartCommand {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl LocalDapCommand for HotRestartCommand {
+    type Response = <HotRestartRequest as dap::requests::Request>::Response;
+    type DapRequest = HotRestartRequest;
+
+    fn to_dap(&self) -> <Self::DapRequest as dap::requests::Request>::Arguments {
+        HotReloadArguments {
+            reason: "manual".to_string(),
+        }
+    }
+
+    fn response_from_dap(
+        &self,
+        message: <Self::DapRequest as dap::requests::Request>::Response,
+    ) -> Result<Self::Response> {
+        Ok(message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hot_reload_command_serializes_to_flutter_contract() {
+        use dap::requests::Request as _;
+        assert_eq!(HotReloadRequest::COMMAND, "hotReload");
+        assert_eq!(HotRestartRequest::COMMAND, "hotRestart");
+
+        let reload = HotReloadCommand::default();
+        let args = reload.to_dap();
+        assert_eq!(
+            serde_json::to_value(&args).unwrap(),
+            serde_json::json!({ "reason": "manual" })
+        );
+
+        let restart = HotRestartCommand::default();
+        let args = restart.to_dap();
+        assert_eq!(
+            serde_json::to_value(&args).unwrap(),
+            serde_json::json!({ "reason": "manual" })
+        );
+    }
+}
