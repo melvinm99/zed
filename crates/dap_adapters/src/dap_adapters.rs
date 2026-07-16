@@ -1,4 +1,5 @@
 mod codelldb;
+mod flutter;
 mod gdb;
 mod go;
 mod javascript;
@@ -18,6 +19,7 @@ use dap::{
     },
     configure_tcp_connection,
 };
+use flutter::FlutterDebugAdapter;
 use gdb::GdbDebugAdapter;
 use go::GoDebugAdapter;
 use gpui::{App, BorrowAppContext};
@@ -32,6 +34,7 @@ pub fn init(cx: &mut App) {
         registry.add_adapter(Arc::from(PythonDebugAdapter::default()));
         registry.add_adapter(Arc::from(JsDebugAdapter::default()));
         registry.add_adapter(Arc::from(GoDebugAdapter::default()));
+        registry.add_adapter(Arc::from(FlutterDebugAdapter::default()));
         registry.add_adapter(Arc::from(GdbDebugAdapter));
 
         #[cfg(any(test, feature = "test-support"))]
