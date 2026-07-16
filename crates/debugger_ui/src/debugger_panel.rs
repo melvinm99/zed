@@ -6,8 +6,9 @@ use crate::session::running::breakpoint_list::BreakpointList;
 use crate::{
     ClearAllBreakpoints, Continue, CopyDebugAdapterArguments, Detach, FocusBreakpointList,
     FocusConsole, FocusFrames, FocusLoadedSources, FocusModules, FocusTerminal, FocusVariables,
-    NewProcessModal, NewProcessMode, Pause, RerunSession, StepInto, StepOut, StepOver, Stop,
-    ToggleExpandItem, ToggleSessionPicker, ToggleThreadPicker, persistence, spawn_task_or_modal,
+    HotReload, HotRestart, NewProcessModal, NewProcessMode, Pause, RerunSession, StepInto,
+    StepOut, StepOver, Stop, ToggleExpandItem, ToggleSessionPicker, ToggleThreadPicker,
+    persistence, spawn_task_or_modal,
 };
 use anyhow::{Context as _, Result, anyhow};
 use collections::IndexMap;
@@ -698,6 +699,17 @@ impl DebugPanel {
                                     let capabilities = running_state.read(cx).capabilities(cx);
                                     let supports_detach =
                                         running_state.read(cx).session().read(cx).is_attached();
+                                    // ponytail: string match mirrors the private
+                                    // `FlutterDebugAdapter::ADAPTER_NAME` constant in
+                                    // dap_adapters::flutter (not reachable cross-crate).
+                                    // Update both if that name ever changes.
+                                    let is_flutter_adapter = running_state
+                                        .read(cx)
+                                        .session()
+                                        .read(cx)
+                                        .adapter()
+                                        .as_ref()
+                                        == "Flutter";
 
                                     this.map(|this| {
                                         if thread_status == ThreadStatus::Running {
@@ -839,6 +851,56 @@ impl DebugPanel {
                                                 }
                                             }),
                                     )
+                                    .when(is_flutter_adapter, |this| {
+                                        this.child(
+                                            IconButton::new(
+                                                "flutter-hot-reload",
+                                                IconName::BoltFilled,
+                                            )
+                                            .icon_size(IconSize::Small)
+                                            .on_click(window.listener_for(
+                                                running_state,
+                                                |this, _, _window, cx| {
+                                                    this.hot_reload(cx);
+                                                },
+                                            ))
+                                            .tooltip({
+                                                let focus_handle = focus_handle.clone();
+                                                move |_window, cx| {
+                                                    Tooltip::for_action_in(
+                                                        "Hot Reload",
+                                                        &HotReload,
+                                                        &focus_handle,
+                                                        cx,
+                                                    )
+                                                }
+                                            }),
+                                        )
+                                        .child(
+                                            IconButton::new(
+                                                "flutter-hot-restart",
+                                                IconName::RotateCw,
+                                            )
+                                            .icon_size(IconSize::Small)
+                                            .on_click(window.listener_for(
+                                                running_state,
+                                                |this, _, _window, cx| {
+                                                    this.hot_restart(cx);
+                                                },
+                                            ))
+                                            .tooltip({
+                                                let focus_handle = focus_handle.clone();
+                                                move |_window, cx| {
+                                                    Tooltip::for_action_in(
+                                                        "Hot Restart",
+                                                        &HotRestart,
+                                                        &focus_handle,
+                                                        cx,
+                                                    )
+                                                }
+                                            }),
+                                        )
+                                    })
                                     .child(
                                         IconButton::new("debug-stop", IconName::Power)
                                             .icon_size(IconSize::Small)

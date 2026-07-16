@@ -1838,6 +1838,18 @@ impl RunningState {
         });
     }
 
+    pub fn hot_reload(&self, cx: &mut Context<Self>) {
+        self.session().update(cx, |state, cx| {
+            state.hot_reload(cx);
+        });
+    }
+
+    pub fn hot_restart(&self, cx: &mut Context<Self>) {
+        self.session().update(cx, |state, cx| {
+            state.hot_restart(cx);
+        });
+    }
+
     pub fn pause_thread(&self, cx: &mut Context<Self>) {
         let Some(thread_id) = self.thread_id else {
             return;

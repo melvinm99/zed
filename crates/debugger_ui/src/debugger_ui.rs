@@ -39,6 +39,10 @@ actions!(
         Pause,
         /// Restarts the current debugging session.
         Restart,
+        /// Performs a Flutter hot reload (injects changed sources, rebuilds widgets).
+        HotReload,
+        /// Performs a Flutter hot restart (full restart, state not preserved).
+        HotRestart,
         /// Reruns the current debugging session with the same configuration.
         RerunSession,
         /// Steps into the next function call.
@@ -218,6 +222,22 @@ pub fn init(cx: &mut App) {
                     move |_: &Restart, _, cx| {
                         active_item
                             .update(cx, |item, cx| item.restart_session(cx))
+                            .ok();
+                    }
+                })
+                .on_action({
+                    let active_item = active_item.clone();
+                    move |_: &HotReload, _, cx| {
+                        active_item
+                            .update(cx, |item, cx| item.hot_reload(cx))
+                            .ok();
+                    }
+                })
+                .on_action({
+                    let active_item = active_item.clone();
+                    move |_: &HotRestart, _, cx| {
+                        active_item
+                            .update(cx, |item, cx| item.hot_restart(cx))
                             .ok();
                     }
                 })
