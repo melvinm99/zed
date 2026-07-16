@@ -74,7 +74,9 @@ impl DebugAdapter for FlutterDebugAdapter {
         match zed_scenario.request {
             DebugRequest::Launch(launch) => {
                 config["request"] = "launch".into();
+                config["env"] = launch.env_json();
                 config["program"] = launch.program.into();
+                config["args"] = launch.args.into();
                 if let Some(cwd) = launch.cwd {
                     config["cwd"] = cwd.to_string_lossy().into_owned().into();
                 }
@@ -103,7 +105,7 @@ impl DebugAdapter for FlutterDebugAdapter {
         task_definition: &DebugTaskDefinition,
         user_installed_path: Option<PathBuf>,
         user_args: Option<Vec<String>>,
-        _user_env: Option<HashMap<String, String>>,
+        user_env: Option<HashMap<String, String>>,
         _cx: &mut AsyncApp,
     ) -> Result<DebugAdapterBinary> {
         let flutter = match user_installed_path {
@@ -115,20 +117,7 @@ impl DebugAdapter for FlutterDebugAdapter {
         };
 
         let mut configuration = task_definition.config.clone();
-
-        // Merge a `deviceId` config field into `toolArgs` as `-d <id>`.
-        if let Some(device) = configuration.get("deviceId").and_then(Value::as_str) {
-            let device = device.to_string();
-            match configuration.get_mut("toolArgs").and_then(Value::as_array_mut) {
-                Some(args) => {
-                    args.insert(0, "-d".into());
-                    args.insert(1, device.into());
-                }
-                None => {
-                    configuration["toolArgs"] = json!(["-d", device]);
-                }
-            }
-        }
+        apply_device_id(&mut configuration);
 
         let cwd = Some(
             task_definition
@@ -148,7 +137,7 @@ impl DebugAdapter for FlutterDebugAdapter {
             command: Some(flutter.to_string_lossy().into_owned()),
             arguments,
             cwd,
-            envs: HashMap::default(),
+            envs: user_env.unwrap_or_default(),
             // ponytail: `flutter debug_adapter` speaks stdio only; no TCP transport to wire up.
             connection: None,
             request_args: StartDebuggingRequestArguments {
@@ -156,5 +145,49 @@ impl DebugAdapter for FlutterDebugAdapter {
                 configuration,
             },
         })
+    }
+}
+
+/// Merges a `deviceId` config field into `toolArgs` as `-d <id>`, preserving any
+/// existing `toolArgs` array (or discarding a malformed non-array value).
+fn apply_device_id(config: &mut Value) {
+    let Some(device) = config.get("deviceId").and_then(Value::as_str) else {
+        return;
+    };
+    let device = device.to_string();
+    match config.get_mut("toolArgs").and_then(Value::as_array_mut) {
+        Some(args) => {
+            args.insert(0, "-d".into());
+            args.insert(1, device.into());
+        }
+        None => {
+            config["toolArgs"] = json!(["-d", device]);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_device_id_no_existing_tool_args() {
+        let mut config = json!({ "deviceId": "macos" });
+        apply_device_id(&mut config);
+        assert_eq!(config["toolArgs"], json!(["-d", "macos"]));
+    }
+
+    #[test]
+    fn apply_device_id_merges_into_existing_tool_args() {
+        let mut config = json!({ "deviceId": "macos", "toolArgs": ["--verbose"] });
+        apply_device_id(&mut config);
+        assert_eq!(config["toolArgs"], json!(["-d", "macos", "--verbose"]));
+    }
+
+    #[test]
+    fn apply_device_id_overwrites_non_array_tool_args() {
+        let mut config = json!({ "deviceId": "macos", "toolArgs": "not-an-array" });
+        apply_device_id(&mut config);
+        assert_eq!(config["toolArgs"], json!(["-d", "macos"]));
     }
 }
