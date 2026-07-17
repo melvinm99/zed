@@ -1060,6 +1060,12 @@ impl RunningState {
         let project = workspace.read(cx).project().clone();
         let dap_store = project.read(cx).dap_store().downgrade();
         let dap_registry = cx.global::<DapRegistry>().clone();
+        // Captured synchronously so a device selected in the status bar
+        // (crate::SelectedFlutterDevice) feeds the launch below without
+        // showing the enumerate+modal picker.
+        let selected_flutter_device = cx
+            .try_global::<crate::SelectedFlutterDevice>()
+            .map(|selected| selected.0.clone());
         let task_store = project.read(cx).task_store().downgrade();
         let weak_project = project.downgrade();
         let weak_workspace = workspace.downgrade();
@@ -1117,49 +1123,53 @@ impl RunningState {
                 .is_some_and(|id| !id.is_empty());
 
             if adapter == FLUTTER_ADAPTER_NAME && !has_device_id {
-                let flutter_env = match flutter_worktree {
-                    Some(worktree) => {
-                        flutter_environment
-                            .update(cx, |environment, cx| {
-                                environment.worktree_environment(worktree, cx)
-                            })
-                            .await
-                    }
-                    None => None,
-                };
-
-                match crate::flutter_device_modal::list_flutter_devices(
-                    flutter_env,
-                    &cx.background_executor(),
-                )
-                .await
-                {
-                    Ok(mut devices) if devices.len() == 1 => {
-                        config["deviceId"] = devices.remove(0).id.into();
-                    }
-                    Ok(devices) if devices.len() > 1 => {
-                        let (tx, rx) = futures::channel::oneshot::channel::<Option<String>>();
-                        let candidates: Arc<[_]> = devices.into();
-
-                        weak_workspace.update_in(cx, |workspace, window, cx| {
-                            workspace.toggle_modal(window, cx, |window, cx| {
-                                FlutterDeviceModal::new(candidates, tx, window, cx)
-                            });
-                        }).ok();
-
-                        if let Some(device_id) = rx.await.ok().flatten() {
-                            config["deviceId"] = device_id.into();
+                if let Some(selected_device) = selected_flutter_device {
+                    config["deviceId"] = selected_device.into();
+                } else {
+                    let flutter_env = match flutter_worktree {
+                        Some(worktree) => {
+                            flutter_environment
+                                .update(cx, |environment, cx| {
+                                    environment.worktree_environment(worktree, cx)
+                                })
+                                .await
                         }
-                    }
-                    Ok(_) => {
-                        log::warn!(
-                            "`flutter devices --machine` returned no devices; launching without a deviceId"
-                        );
-                    }
-                    Err(err) => {
-                        log::warn!(
-                            "failed to list Flutter devices, launching without a deviceId: {err}"
-                        );
+                        None => None,
+                    };
+
+                    match crate::flutter_device_modal::list_flutter_devices(
+                        flutter_env,
+                        &cx.background_executor(),
+                    )
+                    .await
+                    {
+                        Ok(mut devices) if devices.len() == 1 => {
+                            config["deviceId"] = devices.remove(0).id.into();
+                        }
+                        Ok(devices) if devices.len() > 1 => {
+                            let (tx, rx) = futures::channel::oneshot::channel::<Option<String>>();
+                            let candidates: Arc<[_]> = devices.into();
+
+                            weak_workspace.update_in(cx, |workspace, window, cx| {
+                                workspace.toggle_modal(window, cx, |window, cx| {
+                                    FlutterDeviceModal::new(candidates, tx, window, cx)
+                                });
+                            }).ok();
+
+                            if let Some(device_id) = rx.await.ok().flatten() {
+                                config["deviceId"] = device_id.into();
+                            }
+                        }
+                        Ok(_) => {
+                            log::warn!(
+                                "`flutter devices --machine` returned no devices; launching without a deviceId"
+                            );
+                        }
+                        Err(err) => {
+                            log::warn!(
+                                "failed to list Flutter devices, launching without a deviceId: {err}"
+                            );
+                        }
                     }
                 }
             }

@@ -19,9 +19,12 @@ pub mod attach_modal;
 pub mod debugger_panel;
 mod dropdown_menus;
 mod flutter_device_modal;
+mod flutter_device_selector;
 mod new_process_modal;
 mod persistence;
 pub(crate) mod session;
+
+pub use flutter_device_selector::{FlutterDeviceSelector, SelectedFlutterDevice};
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod tests;
