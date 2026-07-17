@@ -2215,16 +2215,30 @@ impl Session {
         if self.as_running().is_none() {
             return;
         }
-        self.request(HotReloadCommand, |_this, _result, _cx| None, cx)
-            .detach();
+        self.request(
+            HotReloadCommand,
+            |_this, result, _cx| {
+                result.log_err();
+                None
+            },
+            cx,
+        )
+        .detach();
     }
 
     pub fn hot_restart(&mut self, cx: &mut Context<Self>) {
         if self.as_running().is_none() {
             return;
         }
-        self.request(HotRestartCommand, |_this, _result, _cx| None, cx)
-            .detach();
+        self.request(
+            HotRestartCommand,
+            |_this, result, _cx| {
+                result.log_err();
+                None
+            },
+            cx,
+        )
+        .detach();
     }
 
     pub fn shutdown(&mut self, cx: &mut Context<Self>) -> Task<()> {

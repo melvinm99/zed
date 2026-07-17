@@ -1,14 +1,19 @@
 use anyhow::{Context as _, Result};
-use futures::channel::oneshot;
+use futures::{FutureExt, channel::oneshot};
 use fuzzy::{StringMatch, StringMatchCandidate};
 use gpui::{
-    App, AppContext, Context, DismissEvent, Entity, EventEmitter, Focusable, IntoElement, Render,
-    Subscription, Task, Window,
+    App, AppContext, BackgroundExecutor, Context, DismissEvent, Entity, EventEmitter, Focusable,
+    IntoElement, Render, Subscription, Task, Window,
 };
 use picker::{Picker, PickerDelegate};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use ui::{ListItem, ListItemSpacing, prelude::*};
 use workspace::ModalView;
+
+/// How long to wait for `flutter devices --machine` before giving up and
+/// falling back to launching without a `deviceId` (a wedged or first-run
+/// `flutter` invocation must not hang the debug-launch flow).
+const LIST_DEVICES_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A device reported by `flutter devices --machine`. Other fields in that JSON
 /// (targetPlatform, sdk, etc.) are ignored.
@@ -32,16 +37,22 @@ pub(crate) struct FlutterDevice {
 /// / the adapter handles on its own.
 pub(crate) async fn list_flutter_devices(
     env: Option<collections::HashMap<String, String>>,
+    executor: &BackgroundExecutor,
 ) -> Result<Vec<FlutterDevice>> {
     let mut command = util::command::new_command("flutter");
     command.args(["devices", "--machine"]);
     if let Some(env) = env {
         command.envs(env);
     }
-    let output = command
-        .output()
-        .await
-        .context("failed to run `flutter devices --machine`")?;
+
+    let timeout = executor.timer(LIST_DEVICES_TIMEOUT);
+    let output = command.output();
+    let output = futures::select_biased! {
+        output = output.fuse() => output.context("failed to run `flutter devices --machine`")?,
+        _ = timeout.fuse() => {
+            anyhow::bail!("`flutter devices --machine` timed out after {LIST_DEVICES_TIMEOUT:?}");
+        }
+    };
     anyhow::ensure!(
         output.status.success(),
         "`flutter devices --machine` exited with a non-zero status"

@@ -1131,7 +1131,12 @@ impl RunningState {
                     None => None,
                 };
 
-                match crate::flutter_device_modal::list_flutter_devices(flutter_env).await {
+                match crate::flutter_device_modal::list_flutter_devices(
+                    flutter_env,
+                    &cx.background_executor(),
+                )
+                .await
+                {
                     Ok(mut devices) if devices.len() == 1 => {
                         config["deviceId"] = devices.remove(0).id.into();
                     }

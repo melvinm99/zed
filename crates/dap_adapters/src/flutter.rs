@@ -154,6 +154,10 @@ fn apply_device_id(config: &mut Value) {
     let Some(device) = config.get("deviceId").and_then(Value::as_str) else {
         return;
     };
+    if device.starts_with('-') {
+        log::warn!("Ignoring deviceId {device:?}: looks like a flag, not a device id");
+        return;
+    }
     let device = device.to_string();
     match config.get_mut("toolArgs").and_then(Value::as_array_mut) {
         Some(args) => {
@@ -189,5 +193,12 @@ mod tests {
         let mut config = json!({ "deviceId": "macos", "toolArgs": "not-an-array" });
         apply_device_id(&mut config);
         assert_eq!(config["toolArgs"], json!(["-d", "macos"]));
+    }
+
+    #[test]
+    fn apply_device_id_rejects_leading_dash() {
+        let mut config = json!({ "deviceId": "--foo" });
+        apply_device_id(&mut config);
+        assert_eq!(config.get("toolArgs"), None);
     }
 }
