@@ -323,12 +323,17 @@ impl Inventory {
             },
         ));
         if self.last_scheduled_scenarios.len() > 5_000 {
-            self.last_scheduled_scenarios.pop_front();
+            // Newest is at the front (push_front above), so drop from the back
+            // to evict the oldest, not the just-scheduled scenario.
+            self.last_scheduled_scenarios.pop_back();
         }
     }
 
     pub fn last_scheduled_scenario(&self) -> Option<&(DebugScenario, DebugScenarioContext)> {
-        self.last_scheduled_scenarios.back()
+        // Newest is pushed to the front, so the most recently scheduled
+        // scenario (what "rerun last" / the Play button should launch) is the
+        // front, not the back.
+        self.last_scheduled_scenarios.front()
     }
 
     pub fn list_debug_scenarios(
