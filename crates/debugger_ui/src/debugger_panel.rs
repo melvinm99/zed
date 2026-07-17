@@ -618,6 +618,31 @@ impl DebugPanel {
         let is_side = self.position(window, cx).axis() == gpui::Axis::Horizontal;
         let div = if is_side { v_flex() } else { h_flex() };
 
+        let run_button = || {
+            // Generic one-click "Run / Start Debugging" (VS Code green-play style).
+            // Dispatches `Rerun`, which launches the most recently used debug
+            // scenario directly, or opens the new-process modal if there is none.
+            // For Flutter scenarios without a `deviceId`, this flows into the
+            // device picker automatically via `resolve_scenario`.
+            IconButton::new("debug-run", IconName::PlayFilled)
+                .icon_size(IconSize::Small)
+                .icon_color(Color::Success)
+                .on_click(move |_, window, cx| {
+                    window.dispatch_action(crate::Rerun.boxed_clone(), cx)
+                })
+                .tooltip({
+                    let focus_handle = focus_handle.clone();
+                    move |_window, cx| {
+                        Tooltip::for_action_in(
+                            "Start Debugging",
+                            &crate::Rerun,
+                            &focus_handle,
+                            cx,
+                        )
+                    }
+                })
+        };
+
         let new_session_button = || {
             IconButton::new("debug-new-session", IconName::Plus)
                 .icon_size(IconSize::Small)
@@ -995,7 +1020,8 @@ impl DebugPanel {
                             ),
                         )
                         .when(is_side, |this| {
-                            this.child(new_session_button())
+                            this.child(run_button())
+                                .child(new_session_button())
                                 .child(edit_debug_json_button())
                                 .child(documentation_button())
                                 .child(logs_button())
@@ -1046,7 +1072,8 @@ impl DebugPanel {
                                     cx,
                                 ))
                                 .when(!is_side, |this| {
-                                    this.child(new_session_button())
+                                    this.child(run_button())
+                                        .child(new_session_button())
                                         .child(edit_debug_json_button())
                                         .child(documentation_button())
                                         .child(logs_button())
