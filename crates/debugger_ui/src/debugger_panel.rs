@@ -740,6 +740,7 @@ impl DebugPanel {
                                                     IconName::DebugPause,
                                                 )
                                                 .icon_size(IconSize::Small)
+                                                .icon_color(Color::Warning)
                                                 .on_click(window.listener_for(
                                                     running_state,
                                                     |this, _, _window, cx| {
@@ -765,6 +766,7 @@ impl DebugPanel {
                                                     IconName::DebugContinue,
                                                 )
                                                 .icon_size(IconSize::Small)
+                                                .icon_color(Color::Success)
                                                 .disabled(thread_status != ThreadStatus::Stopped)
                                                 .on_click(window.listener_for(
                                                     running_state,
@@ -787,6 +789,7 @@ impl DebugPanel {
                                     .child(
                                         IconButton::new("step-over", IconName::DebugStepOver)
                                             .icon_size(IconSize::Small)
+                                            .icon_color(Color::Info)
                                             .on_click(window.listener_for(
                                                 running_state,
                                                 |this, _, _window, cx| {
@@ -809,6 +812,7 @@ impl DebugPanel {
                                     .child(
                                         IconButton::new("step-into", IconName::DebugStepInto)
                                             .icon_size(IconSize::Small)
+                                            .icon_color(Color::Info)
                                             .on_click(window.listener_for(
                                                 running_state,
                                                 |this, _, _window, cx| {
@@ -831,6 +835,7 @@ impl DebugPanel {
                                     .child(
                                         IconButton::new("step-out", IconName::DebugStepOut)
                                             .icon_size(IconSize::Small)
+                                            .icon_color(Color::Info)
                                             .on_click(window.listener_for(
                                                 running_state,
                                                 |this, _, _window, cx| {
@@ -854,6 +859,7 @@ impl DebugPanel {
                                     .child(
                                         IconButton::new("debug-restart", IconName::RotateCcw)
                                             .icon_size(IconSize::Small)
+                                            .icon_color(Color::Accent)
                                             .on_click(window.listener_for(
                                                 running_state,
                                                 |this, _, window, cx| {
@@ -879,6 +885,7 @@ impl DebugPanel {
                                                 IconName::BoltFilled,
                                             )
                                             .icon_size(IconSize::Small)
+                                            .icon_color(Color::Success)
                                             .on_click(window.listener_for(
                                                 running_state,
                                                 |this, _, _window, cx| {
@@ -903,6 +910,7 @@ impl DebugPanel {
                                                 IconName::RotateCw,
                                             )
                                             .icon_size(IconSize::Small)
+                                            .icon_color(Color::Warning)
                                             .on_click(window.listener_for(
                                                 running_state,
                                                 |this, _, _window, cx| {
@@ -925,6 +933,7 @@ impl DebugPanel {
                                     .child(
                                         IconButton::new("debug-stop", IconName::Power)
                                             .icon_size(IconSize::Small)
+                                            .icon_color(Color::Error)
                                             .on_click(window.listener_for(
                                                 running_state,
                                                 |this, _, _window, cx| {
