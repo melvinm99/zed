@@ -2,7 +2,7 @@ use gpui::{
     Anchor, App, Context, Entity, Global, IntoElement, ParentElement, Render, SharedString,
     Styled, Subscription, Task, WeakEntity, Window, div,
 };
-use project::Worktree;
+use project::{Worktree, WorktreeId};
 use ui::{Button, ButtonCommon, ContextMenu, LabelSize, PopoverMenu, Tooltip};
 use util::rel_path::RelPath;
 use workspace::{HideStatusItem, StatusItemView, Workspace, item::ItemHandle};
@@ -22,6 +22,7 @@ pub struct FlutterDeviceSelector {
     workspace: WeakEntity<Workspace>,
     is_flutter_project: bool,
     devices: Vec<FlutterDevice>,
+    flutter_worktree_id: Option<WorktreeId>,
     _observe_selected: Subscription,
     _refresh_task: Task<Option<()>>,
 }
@@ -32,6 +33,7 @@ impl FlutterDeviceSelector {
             workspace: workspace.weak_handle(),
             is_flutter_project: false,
             devices: Vec::new(),
+            flutter_worktree_id: None,
             _observe_selected: cx.observe_global::<SelectedFlutterDevice>(|_, cx| cx.notify()),
             _refresh_task: Task::ready(None),
         };
@@ -51,16 +53,22 @@ impl FlutterDeviceSelector {
     }
 
     /// Re-detects whether the project is a Flutter project and, if so,
-    /// (re-)lists devices in the background.
-    // ponytail: re-runs `flutter devices --machine` on every active-pane-item
-    // change rather than only when the worktree set actually changes; fine
-    // since it's a background task with a timeout, but debounce/cache here if
-    // it shows up as overhead on real projects.
+    /// (re-)lists devices in the background. A no-op if the detected Flutter
+    /// worktree (or lack thereof) is unchanged since the last call, so this
+    /// can be called on every active-pane-item change without spawning a new
+    /// `flutter devices --machine` subprocess on every tab switch.
     fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
-        let Some(worktree) = Self::flutter_worktree(&workspace, cx) else {
+        let worktree = Self::flutter_worktree(&workspace, cx);
+        let worktree_id = worktree.as_ref().map(|worktree| worktree.read(cx).id());
+        if worktree_id == self.flutter_worktree_id {
+            return;
+        }
+        self.flutter_worktree_id = worktree_id;
+
+        let Some(worktree) = worktree else {
             self.is_flutter_project = false;
             self.devices.clear();
             cx.notify();

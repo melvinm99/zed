@@ -41,6 +41,10 @@ pub(crate) async fn list_flutter_devices(
 ) -> Result<Vec<FlutterDevice>> {
     let mut command = util::command::new_command("flutter");
     command.args(["devices", "--machine"]);
+    // Ensure a cancelled/superseded refresh (the `Task` running this future
+    // dropped) actually kills the child instead of leaving an orphaned
+    // `flutter devices` process running.
+    command.kill_on_drop(true);
     if let Some(env) = env {
         command.envs(env);
     }
