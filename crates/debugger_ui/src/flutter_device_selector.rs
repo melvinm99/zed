@@ -29,7 +29,7 @@ pub struct FlutterDeviceSelector {
 
 impl FlutterDeviceSelector {
     pub fn new(workspace: &Workspace, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut this = Self {
+        let this = Self {
             workspace: workspace.weak_handle(),
             is_flutter_project: false,
             devices: Vec::new(),
@@ -37,7 +37,11 @@ impl FlutterDeviceSelector {
             _observe_selected: cx.observe_global::<SelectedFlutterDevice>(|_, cx| cx.notify()),
             _refresh_task: Task::ready(None),
         };
-        this.refresh(window, cx);
+        // `new` runs inside a Workspace update (via observe_new /
+        // initialize_workspace), so reading the Workspace entity synchronously
+        // here would double-lease it and panic. Defer the initial refresh so it
+        // runs once that update has completed.
+        cx.defer_in(window, |this, window, cx| this.refresh(window, cx));
         this
     }
 
