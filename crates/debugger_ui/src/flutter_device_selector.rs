@@ -159,7 +159,12 @@ impl StatusItemView for FlutterDeviceSelector {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.refresh(window, cx);
+        // `add_right_item` calls this synchronously while the Workspace is
+        // still being updated (in initialize_workspace), and pane changes can
+        // also fire mid-update. `refresh` reads the Workspace entity, which
+        // would double-lease it, so defer. The worktree-change guard in
+        // `refresh` keeps repeated deferred calls cheap (no-op when unchanged).
+        cx.defer_in(window, |this, window, cx| this.refresh(window, cx));
     }
 
     fn hide_setting(&self, _: &App) -> Option<HideStatusItem> {
