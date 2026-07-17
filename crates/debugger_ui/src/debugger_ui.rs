@@ -47,6 +47,10 @@ actions!(
         HotReload,
         /// Performs a Flutter hot restart (full restart, state not preserved).
         HotRestart,
+        /// Opens Flutter DevTools (widget inspector) in the browser for the running session.
+        OpenDevTools,
+        /// Toggles Flutter's "select widget mode" for tapping a widget on-device to inspect it.
+        ToggleSelectWidgetMode,
         /// Reruns the current debugging session with the same configuration.
         RerunSession,
         /// Steps into the next function call.

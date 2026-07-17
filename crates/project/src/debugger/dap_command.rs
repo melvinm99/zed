@@ -2049,6 +2049,46 @@ impl LocalDapCommand for HotRestartCommand {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) struct CallServiceArguments {
+    pub method: String,
+    pub params: serde_json::Value,
+}
+
+/// Flutter/VM-service custom DAP request: invokes an arbitrary VM service extension method
+/// (e.g. `ext.flutter.inspector.show` to toggle widget-select mode).
+pub(crate) enum CallServiceRequest {}
+impl dap::requests::Request for CallServiceRequest {
+    const COMMAND: &'static str = "callService";
+    type Arguments = CallServiceArguments;
+    type Response = serde_json::Value;
+}
+
+#[derive(Debug, Hash, PartialEq, Eq)]
+pub(crate) struct CallServiceCommand {
+    pub method: String,
+    pub params: serde_json::Value,
+}
+
+impl LocalDapCommand for CallServiceCommand {
+    type Response = <CallServiceRequest as dap::requests::Request>::Response;
+    type DapRequest = CallServiceRequest;
+
+    fn to_dap(&self) -> <Self::DapRequest as dap::requests::Request>::Arguments {
+        CallServiceArguments {
+            method: self.method.clone(),
+            params: self.params.clone(),
+        }
+    }
+
+    fn response_from_dap(
+        &self,
+        message: <Self::DapRequest as dap::requests::Request>::Response,
+    ) -> Result<Self::Response> {
+        Ok(message)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2071,6 +2111,25 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&args).unwrap(),
             serde_json::json!({ "reason": "manual" })
+        );
+    }
+
+    #[test]
+    fn call_service_command_serializes_to_flutter_contract() {
+        use dap::requests::Request as _;
+        assert_eq!(CallServiceRequest::COMMAND, "callService");
+
+        let command = CallServiceCommand {
+            method: "ext.flutter.inspector.show".to_string(),
+            params: serde_json::json!({ "enabled": true }),
+        };
+        let args = command.to_dap();
+        assert_eq!(
+            serde_json::to_value(&args).unwrap(),
+            serde_json::json!({
+                "method": "ext.flutter.inspector.show",
+                "params": { "enabled": true }
+            })
         );
     }
 }

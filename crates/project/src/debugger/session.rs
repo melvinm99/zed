@@ -2,12 +2,13 @@ use super::breakpoint_store::{
     BreakpointStore, BreakpointStoreEvent, BreakpointUpdatedReason, SourceBreakpoint,
 };
 use super::dap_command::{
-    self, Attach, ConfigurationDone, ContinueCommand, DataBreakpointInfoCommand, DisconnectCommand,
-    EvaluateCommand, HotReloadCommand, HotRestartCommand, Initialize, Launch, LoadedSourcesCommand,
-    LocalDapCommand, LocationsCommand, ModulesCommand, NextCommand, PauseCommand, RestartCommand,
-    RestartStackFrameCommand, ScopesCommand, SetDataBreakpointsCommand, SetExceptionBreakpoints,
-    SetVariableValueCommand, StackTraceCommand, StepBackCommand, StepCommand, StepInCommand,
-    StepOutCommand, TerminateCommand, TerminateThreadsCommand, ThreadsCommand, VariablesCommand,
+    self, Attach, CallServiceCommand, ConfigurationDone, ContinueCommand, DataBreakpointInfoCommand,
+    DisconnectCommand, EvaluateCommand, HotReloadCommand, HotRestartCommand, Initialize, Launch,
+    LoadedSourcesCommand, LocalDapCommand, LocationsCommand, ModulesCommand, NextCommand,
+    PauseCommand, RestartCommand, RestartStackFrameCommand, ScopesCommand, SetDataBreakpointsCommand,
+    SetExceptionBreakpoints, SetVariableValueCommand, StackTraceCommand, StepBackCommand,
+    StepCommand, StepInCommand, StepOutCommand, TerminateCommand, TerminateThreadsCommand,
+    ThreadsCommand, VariablesCommand,
 };
 use super::dap_store::DapStore;
 use crate::debugger::breakpoint_store::BreakpointSessionState;
@@ -718,6 +719,7 @@ pub struct Session {
     node_runtime: Option<NodeRuntime>,
     http_client: Option<Arc<dyn HttpClient>>,
     companion_port: Option<u16>,
+    vm_service_uri: Option<String>,
 }
 
 trait CacheableCommand: Any + Send + Sync {
@@ -808,6 +810,7 @@ pub enum SessionEvent {
     DataBreakpointInfo,
     ConsoleOutput,
     HistoricSnapshotSelected,
+    VmServiceUriChanged,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -893,6 +896,7 @@ impl Session {
                 node_runtime,
                 http_client,
                 companion_port: None,
+                vm_service_uri: None,
             }
         })
     }
@@ -1072,6 +1076,12 @@ impl Session {
 
     pub fn adapter(&self) -> DebugAdapterName {
         self.adapter.clone()
+    }
+
+    /// The `ws://` URI of the running Dart/Flutter VM service, if the debug adapter has
+    /// reported one via the `dart.debuggerUris` custom DAP event. Used to launch DevTools.
+    pub fn vm_service_uri(&self) -> Option<&str> {
+        self.vm_service_uri.as_deref()
     }
 
     pub fn label(&self) -> Option<SharedString> {
@@ -1653,6 +1663,16 @@ impl Session {
                         return;
                     };
                     self.kill_browser(request, cx);
+                } else if event.event == "dart.debuggerUris" {
+                    let Some(event) =
+                        serde_json::from_value::<DebuggerUrisEvent>(event.body).ok()
+                    else {
+                        log::error!("failed to deserialize dart.debuggerUris event");
+                        return;
+                    };
+                    self.vm_service_uri = Some(event.vm_service_uri);
+                    cx.emit(SessionEvent::VmServiceUriChanged);
+                    cx.notify();
                 }
             }
         }
@@ -2232,6 +2252,31 @@ impl Session {
         }
         self.request(
             HotRestartCommand,
+            |_this, result, _cx| {
+                result.log_err();
+                None
+            },
+            cx,
+        )
+        .detach();
+    }
+
+    /// Invokes a VM service extension method via the Flutter debug adapter's custom
+    /// `callService` DAP request (e.g. `ext.flutter.inspector.show` for widget-select mode).
+    pub fn call_service(
+        &mut self,
+        method: impl Into<String>,
+        params: serde_json::Value,
+        cx: &mut Context<Self>,
+    ) {
+        if self.as_running().is_none() {
+            return;
+        }
+        self.request(
+            CallServiceCommand {
+                method: method.into(),
+                params,
+            },
             |_this, result, _cx| {
                 result.log_err();
                 None
@@ -3128,6 +3173,14 @@ struct LaunchBrowserInCompanionParams {
 #[serde(rename_all = "camelCase")]
 struct KillCompanionBrowserParams {
     launch_id: u64,
+}
+
+/// Flutter debug adapter custom DAP event: reports the ws:// URI of the running VM service,
+/// used to launch DevTools (`dart devtools <uri>`).
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct DebuggerUrisEvent {
+    vm_service_uri: String,
 }
 
 async fn spawn_companion(

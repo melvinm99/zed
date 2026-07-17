@@ -6,9 +6,9 @@ use crate::session::running::breakpoint_list::BreakpointList;
 use crate::{
     ClearAllBreakpoints, Continue, CopyDebugAdapterArguments, Detach, FocusBreakpointList,
     FocusConsole, FocusFrames, FocusLoadedSources, FocusModules, FocusTerminal, FocusVariables,
-    HotReload, HotRestart, NewProcessModal, NewProcessMode, Pause, RerunSession, StepInto,
-    StepOut, StepOver, Stop, ToggleExpandItem, ToggleSessionPicker, ToggleThreadPicker,
-    persistence, spawn_task_or_modal,
+    HotReload, HotRestart, NewProcessModal, NewProcessMode, OpenDevTools, Pause, RerunSession,
+    StepInto, StepOut, StepOver, Stop, ToggleExpandItem, ToggleSelectWidgetMode,
+    ToggleSessionPicker, ToggleThreadPicker, persistence, spawn_task_or_modal,
 };
 use anyhow::{Context as _, Result, anyhow};
 use collections::IndexMap;
@@ -731,6 +731,14 @@ impl DebugPanel {
                                         .adapter()
                                         .as_ref()
                                         == FLUTTER_ADAPTER_NAME;
+                                    let has_vm_service = running_state
+                                        .read(cx)
+                                        .session()
+                                        .read(cx)
+                                        .vm_service_uri()
+                                        .is_some();
+                                    let select_widget_mode =
+                                        running_state.read(cx).select_widget_mode();
 
                                     this.map(|this| {
                                         if thread_status == ThreadStatus::Running {
@@ -923,6 +931,62 @@ impl DebugPanel {
                                                     Tooltip::for_action_in(
                                                         "Hot Restart",
                                                         &HotRestart,
+                                                        &focus_handle,
+                                                        cx,
+                                                    )
+                                                }
+                                            }),
+                                        )
+                                    })
+                                    .when(has_vm_service, |this| {
+                                        this.child(
+                                            IconButton::new(
+                                                "flutter-open-devtools",
+                                                IconName::ArrowUpRight,
+                                            )
+                                            .icon_size(IconSize::Small)
+                                            .icon_color(Color::Accent)
+                                            .on_click(window.listener_for(
+                                                running_state,
+                                                |this, _, _window, cx| {
+                                                    this.open_devtools(cx);
+                                                },
+                                            ))
+                                            .tooltip({
+                                                let focus_handle = focus_handle.clone();
+                                                move |_window, cx| {
+                                                    Tooltip::for_action_in(
+                                                        "Open DevTools",
+                                                        &OpenDevTools,
+                                                        &focus_handle,
+                                                        cx,
+                                                    )
+                                                }
+                                            }),
+                                        )
+                                        .child(
+                                            IconButton::new(
+                                                "flutter-select-widget",
+                                                IconName::Crosshair,
+                                            )
+                                            .icon_size(IconSize::Small)
+                                            .icon_color(if select_widget_mode {
+                                                Color::Accent
+                                            } else {
+                                                Color::Default
+                                            })
+                                            .on_click(window.listener_for(
+                                                running_state,
+                                                |this, _, _window, cx| {
+                                                    this.toggle_select_widget_mode(cx);
+                                                },
+                                            ))
+                                            .tooltip({
+                                                let focus_handle = focus_handle.clone();
+                                                move |_window, cx| {
+                                                    Tooltip::for_action_in(
+                                                        "Select Widget Mode",
+                                                        &ToggleSelectWidgetMode,
                                                         &focus_handle,
                                                         cx,
                                                     )

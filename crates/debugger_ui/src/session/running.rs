@@ -57,6 +57,7 @@ use ui::{
     VisualContext, prelude::*,
 };
 use util::ResultExt;
+use util::command::new_command;
 use variable_list::VariableList;
 use workspace::{
     ActivePaneDecorator, DraggedTab, Item, ItemHandle, Member, Pane, PaneGroup, SplitDirection,
@@ -90,6 +91,7 @@ pub struct RunningState {
     pub(crate) scenario: Option<DebugScenario>,
     pub(crate) scenario_context: Option<DebugScenarioContext>,
     memory_view: Entity<MemoryView>,
+    select_widget_mode: bool,
 }
 
 impl RunningState {
@@ -1015,6 +1017,7 @@ impl RunningState {
             _schedule_serialize: None,
             scenario: None,
             scenario_context: None,
+            select_widget_mode: false,
         }
     }
 
@@ -1917,6 +1920,72 @@ impl RunningState {
         self.session().update(cx, |state, cx| {
             state.hot_restart(cx);
         });
+    }
+
+    /// Launches Flutter DevTools (widget inspector) in the browser for this session's VM
+    /// service. No-ops (with a log warning) if no VM service URI has been reported yet, or
+    /// if `dart` can't be spawned.
+    pub fn open_devtools(&self, cx: &mut Context<Self>) {
+        let Some(uri) = self.session().read(cx).vm_service_uri().map(str::to_string) else {
+            log::warn!("open_devtools: no VM service URI available yet");
+            return;
+        };
+        let Some(project) = self.project.upgrade() else {
+            return;
+        };
+        // `dart` is spawned via its bare name, and a macOS `.app` launched from Finder
+        // doesn't inherit the user's shell PATH, so resolve the worktree's shell environment
+        // (mirrors the Flutter device picker in `resolve_scenario`).
+        let worktree = project.read(cx).worktrees(cx).next();
+        let environment = project.read(cx).environment().clone();
+
+        cx.spawn(async move |_this, cx| {
+            let env = match worktree {
+                Some(worktree) => {
+                    environment
+                        .update(cx, |environment, cx| {
+                            environment.worktree_environment(worktree, cx)
+                        })
+                        .await
+                }
+                None => None,
+            };
+
+            // `dart devtools <uri>` starts a long-lived local server and opens the browser
+            // itself (`--launch-browser` defaults on); intentionally not awaited to
+            // completion and not killed on drop.
+            let mut command = new_command("dart");
+            command.args(["devtools", &uri]);
+            if let Some(env) = env {
+                command.envs(env);
+            }
+            if let Err(err) = command.spawn() {
+                log::warn!("failed to spawn `dart devtools`: {err}");
+            }
+        })
+        .detach();
+    }
+
+    pub fn select_widget_mode(&self) -> bool {
+        self.select_widget_mode
+    }
+
+    /// Toggles Flutter's "select widget mode" (tap a widget on-device to inspect it) via the
+    /// `ext.flutter.inspector.show` VM service extension.
+    ///
+    /// Note: the exact `params` shape (whether an `isolateId` is required) can only be
+    /// confirmed at runtime against a live Flutter VM service.
+    pub fn toggle_select_widget_mode(&mut self, cx: &mut Context<Self>) {
+        self.select_widget_mode = !self.select_widget_mode;
+        let enabled = self.select_widget_mode;
+        self.session().update(cx, |session, cx| {
+            session.call_service(
+                "ext.flutter.inspector.show",
+                serde_json::json!({ "enabled": enabled }),
+                cx,
+            );
+        });
+        cx.notify();
     }
 
     pub fn pause_thread(&self, cx: &mut Context<Self>) {
