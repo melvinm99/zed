@@ -12,7 +12,7 @@ use crate::{
 };
 use anyhow::{Context as _, Result, anyhow};
 use collections::IndexMap;
-use dap::adapters::DebugAdapterName;
+use dap::adapters::{DebugAdapterName, FLUTTER_ADAPTER_NAME};
 use dap::{DapRegistry, StartDebuggingRequestArguments};
 use dap::{client::SessionId, debugger_settings::DebuggerSettings};
 use editor::{Editor, MultiBufferOffset, ToPoint};
@@ -699,17 +699,13 @@ impl DebugPanel {
                                     let capabilities = running_state.read(cx).capabilities(cx);
                                     let supports_detach =
                                         running_state.read(cx).session().read(cx).is_attached();
-                                    // ponytail: string match mirrors the private
-                                    // `FlutterDebugAdapter::ADAPTER_NAME` constant in
-                                    // dap_adapters::flutter (not reachable cross-crate).
-                                    // Update both if that name ever changes.
                                     let is_flutter_adapter = running_state
                                         .read(cx)
                                         .session()
                                         .read(cx)
                                         .adapter()
                                         .as_ref()
-                                        == "Flutter";
+                                        == FLUTTER_ADAPTER_NAME;
 
                                     this.map(|this| {
                                         if thread_status == ThreadStatus::Running {

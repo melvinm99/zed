@@ -18,7 +18,7 @@ use task::{DebugScenario, ZedDebugConfig};
 pub(crate) struct FlutterDebugAdapter;
 
 impl FlutterDebugAdapter {
-    const ADAPTER_NAME: &'static str = "Flutter";
+    const ADAPTER_NAME: &'static str = dap::adapters::FLUTTER_ADAPTER_NAME;
     // ponytail: verified against `flutter --help` on a real Flutter SDK install before
     // shipping; the DAP entrypoint subcommand may be spelled `debug-adapter` on some
     // versions. Update this single constant if so.
@@ -36,7 +36,6 @@ impl DebugAdapter for FlutterDebugAdapter {
     }
 
     fn dap_schema(&self) -> Value {
-        // Minimal launch/attach schema: `program`, `cwd`, `deviceId`, `toolArgs`, `noDebug`.
         json!({
             "properties": {
                 "request": { "type": "string", "enum": ["launch", "attach"] },
@@ -59,6 +58,17 @@ impl DebugAdapter for FlutterDebugAdapter {
                     "items": { "type": "string" },
                     "description": "Extra arguments forwarded to `flutter debug_adapter`.",
                     "default": []
+                },
+                "args": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Extra arguments forwarded to the running app.",
+                    "default": []
+                },
+                "env": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" },
+                    "description": "Environment variables to set when launching the app."
                 },
                 "noDebug": {
                     "type": "boolean",
@@ -161,8 +171,13 @@ fn apply_device_id(config: &mut Value) {
     let device = device.to_string();
     match config.get_mut("toolArgs").and_then(Value::as_array_mut) {
         Some(args) => {
-            args.insert(0, "-d".into());
-            args.insert(1, device.into());
+            let has_device_flag = args
+                .iter()
+                .any(|arg| matches!(arg.as_str(), Some("-d") | Some("--device-id")));
+            if !has_device_flag {
+                args.insert(0, "-d".into());
+                args.insert(1, device.into());
+            }
         }
         None => {
             config["toolArgs"] = json!(["-d", device]);
@@ -200,5 +215,12 @@ mod tests {
         let mut config = json!({ "deviceId": "--foo" });
         apply_device_id(&mut config);
         assert_eq!(config.get("toolArgs"), None);
+    }
+
+    #[test]
+    fn apply_device_id_does_not_duplicate_existing_device_flag() {
+        let mut config = json!({ "deviceId": "chrome", "toolArgs": ["-d", "chrome"] });
+        apply_device_id(&mut config);
+        assert_eq!(config["toolArgs"], json!(["-d", "chrome"]));
     }
 }

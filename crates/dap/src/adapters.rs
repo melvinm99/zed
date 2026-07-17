@@ -104,6 +104,10 @@ impl<'a> From<&'a str> for DebugAdapterName {
     }
 }
 
+/// Registered name of the built-in Flutter debug adapter; shared so UI gating
+/// can't drift from the adapter.
+pub const FLUTTER_ADAPTER_NAME: &str = "Flutter";
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TcpArguments {
     pub host: IpAddr,

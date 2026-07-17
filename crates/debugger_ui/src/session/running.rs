@@ -27,7 +27,7 @@ use collections::{HashMap, IndexMap};
 use console::Console;
 use dap::{
     Capabilities, DapRegistry, RunInTerminalRequestArguments, Thread,
-    adapters::{DebugAdapterName, DebugTaskDefinition},
+    adapters::{DebugAdapterName, DebugTaskDefinition, FLUTTER_ADAPTER_NAME},
     client::SessionId,
     debugger_settings::DebuggerSettings,
 };
@@ -1111,15 +1111,12 @@ impl RunningState {
                 Self::substitute_process_id_in_config(&mut config, process_id);
             }
 
-            // ponytail: string match mirrors the private `FlutterDebugAdapter::ADAPTER_NAME`
-            // constant in dap_adapters::flutter (not reachable cross-crate); same pattern as
-            // debugger_panel.rs's `is_flutter_adapter` check.
             let has_device_id = config
                 .get("deviceId")
                 .and_then(Value::as_str)
                 .is_some_and(|id| !id.is_empty());
 
-            if adapter == "Flutter" && !has_device_id {
+            if adapter == FLUTTER_ADAPTER_NAME && !has_device_id {
                 let flutter_env = match flutter_worktree {
                     Some(worktree) => {
                         flutter_environment
