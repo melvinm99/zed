@@ -938,7 +938,7 @@ impl DebugPanel {
                                             }),
                                         )
                                     })
-                                    .when(has_vm_service, |this| {
+                                    .when(is_flutter_adapter && has_vm_service, |this| {
                                         this.child(
                                             IconButton::new(
                                                 "flutter-open-devtools",

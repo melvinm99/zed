@@ -251,6 +251,22 @@ pub fn init(cx: &mut App) {
                 })
                 .on_action({
                     let active_item = active_item.clone();
+                    move |_: &OpenDevTools, _, cx| {
+                        active_item
+                            .update(cx, |item, cx| item.open_devtools(cx))
+                            .ok();
+                    }
+                })
+                .on_action({
+                    let active_item = active_item.clone();
+                    move |_: &ToggleSelectWidgetMode, _, cx| {
+                        active_item
+                            .update(cx, |item, cx| item.toggle_select_widget_mode(cx))
+                            .ok();
+                    }
+                })
+                .on_action({
+                    let active_item = active_item.clone();
                     move |_: &RerunSession, window, cx| {
                         active_item
                             .update(cx, |item, cx| item.rerun_session(window, cx))
