@@ -4,7 +4,7 @@ use super::{
 };
 use anyhow::Result;
 use collections::HashMap;
-use dap::{CompletionItem, CompletionItemType, OutputEvent};
+use dap::{CompletionItem, CompletionItemType, OutputEvent, OutputEventCategory};
 use editor::{
     Bias, CompletionProvider, Editor, EditorElement, EditorMode, EditorStyle, HighlightKey,
     MultiBufferOffset, SizingBehavior,
@@ -165,10 +165,12 @@ impl Console {
                 let mut len = console
                     .update(cx, |this, cx| this.buffer().read(cx).len(cx))?
                     .0;
-                let (output, spans, background_spans) = cx
+                let (output, spans, background_spans, severity_spans, important_spans) = cx
                     .background_spawn(async move {
                         let mut all_spans = Vec::new();
                         let mut all_background_spans = Vec::new();
+                        let mut all_severity_spans = Vec::new();
+                        let mut all_important_spans = Vec::new();
                         let mut to_insert = String::new();
                         let mut scratch = String::new();
 
@@ -182,6 +184,48 @@ impl Console {
                             to_insert.extend(output.chars());
                             let mut spans = parsed_output.foreground_spans;
                             let mut background_spans = parsed_output.background_spans;
+
+                            // Only add our own severity coloring when the event carries no
+                            // *colored* ANSI foreground spans of its own. Note `parse_ansi_text`
+                            // always emits at least one foreground span for non-empty text (with
+                            // `color: None` when there was no SGR color code), so checking
+                            // `spans.is_empty()` would never be true for real output -- we must
+                            // check that every span's color is `None` instead. A tool that does
+                            // emit ANSI colors already communicated its own severity, so we must
+                            // not override it.
+                            if spans.iter().all(|(_, color)| color.is_none()) {
+                                let event_start = len;
+                                let mut line_offset = 0usize;
+                                let mut found_severity = false;
+
+                                for line in output.split('\n') {
+                                    let line_start = line_offset;
+                                    let line_end = line_offset + line.len();
+                                    line_offset = line_end + 1;
+
+                                    let trimmed_line = line.trim();
+                                    if trimmed_line.is_empty() {
+                                        continue;
+                                    }
+
+                                    if let Some(severity) =
+                                        severity_for_event(event.category.as_ref(), trimmed_line)
+                                    {
+                                        all_severity_spans.push((
+                                            event_start + line_start..event_start + line_end,
+                                            severity,
+                                        ));
+                                        found_severity = true;
+                                    }
+                                }
+
+                                if !found_severity
+                                    && matches!(event.category, Some(OutputEventCategory::Important))
+                                {
+                                    all_important_spans
+                                        .push(event_start..event_start + output.len());
+                                }
+                            }
 
                             for (range, _) in spans.iter_mut() {
                                 let start_offset = len + range.start;
@@ -198,7 +242,13 @@ impl Console {
                             all_spans.extend(spans);
                             all_background_spans.extend(background_spans);
                         }
-                        (to_insert, all_spans, all_background_spans)
+                        (
+                            to_insert,
+                            all_spans,
+                            all_background_spans,
+                            all_severity_spans,
+                            all_important_spans,
+                        )
                     })
                     .await;
                 console.update_in(cx, |console, window, cx| {
@@ -240,6 +290,53 @@ impl Console {
                             HighlightKey::ConsoleAnsiHighlight(start_offset),
                             &[range],
                             move |_, theme| color_fn(theme),
+                            cx,
+                        );
+                    }
+
+                    // Severity/importance spans are only ever produced for events with no
+                    // *colored* ANSI foreground spans (see the background task above): spans
+                    // with `color: None` are skipped by the `let Some(color) = color else {
+                    // continue }` guard above and never call `highlight_text_key`, so severity
+                    // spans never land on an offset already claimed by an ANSI highlight. That
+                    // lets us reuse the `ConsoleAnsiHighlight` key here instead of adding a new
+                    // `HighlightKey` variant in the editor crate.
+                    let error_color = cx.theme().status().error;
+                    let warning_color = cx.theme().status().warning;
+
+                    for (range, severity) in severity_spans {
+                        let color = match severity {
+                            Severity::Error => error_color,
+                            Severity::Warning => warning_color,
+                        };
+                        let start_offset = range.start;
+                        let range = buffer.anchor_after(MultiBufferOffset(range.start))
+                            ..buffer.anchor_before(MultiBufferOffset(range.end));
+                        console.highlight_text_key(
+                            HighlightKey::ConsoleAnsiHighlight(start_offset),
+                            vec![range],
+                            HighlightStyle {
+                                color: Some(color),
+                                ..Default::default()
+                            },
+                            false,
+                            cx,
+                        );
+                    }
+
+                    let accent_color = cx.theme().colors().text_accent;
+                    for range in important_spans {
+                        let start_offset = range.start;
+                        let range = buffer.anchor_after(MultiBufferOffset(range.start))
+                            ..buffer.anchor_before(MultiBufferOffset(range.end));
+                        console.highlight_text_key(
+                            HighlightKey::ConsoleAnsiHighlight(start_offset),
+                            vec![range],
+                            HighlightStyle {
+                                color: Some(accent_color),
+                                ..Default::default()
+                            },
+                            false,
                             cx,
                         );
                     }
@@ -786,6 +883,58 @@ impl ConsoleQueryBarCompletionProvider {
     }
 }
 
+/// Severity of a debug console output line, used to color a few high-confidence
+/// error/warning markers when the event carries no ANSI styling of its own.
+#[derive(Copy, Clone, PartialEq, Debug)]
+enum Severity {
+    Error,
+    Warning,
+}
+
+/// Returns true if `line` starts with `word` (case-insensitive), followed by
+/// ':', whitespace, or the end of the string. This rejects "errors" matching
+/// the word "error", so it won't false-positive on `errors happen`.
+fn starts_with_word(line: &str, word: &str) -> bool {
+    let Some(rest) = line.get(..word.len()) else {
+        return false;
+    };
+    if !rest.eq_ignore_ascii_case(word) {
+        return false;
+    }
+    match line[word.len()..].chars().next() {
+        None => true,
+        Some(c) => c == ':' || c.is_whitespace(),
+    }
+}
+
+/// Classifies a single trimmed line based on a small set of high-confidence
+/// markers: a leading "error"/"warning" word, or ✗/✖/❌/⚠ glyphs anywhere in
+/// the line. Deliberately does not match broader phrases (e.g. "discontinued",
+/// "incompatible") since those are too brittle to be worth the false positives.
+fn classify_line(line: &str) -> Option<Severity> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    if starts_with_word(line, "error") || line.contains(['✗', '✖', '❌']) {
+        return Some(Severity::Error);
+    }
+    if starts_with_word(line, "warning") || line.contains('⚠') {
+        return Some(Severity::Warning);
+    }
+    None
+}
+
+/// Severity for a single output line, taking the event's DAP category into
+/// account: `stderr` is always treated as an error, everything else falls
+/// back to the content-based heuristic in `classify_line`.
+fn severity_for_event(category: Option<&OutputEventCategory>, line: &str) -> Option<Severity> {
+    match category {
+        Some(OutputEventCategory::Stderr) => Some(Severity::Error),
+        _ => classify_line(line),
+    }
+}
+
 fn background_color_fetcher(color: terminal::Color) -> impl Fn(&Theme) -> Hsla {
     move |theme| {
         if terminal::is_default_background_color(color) {
@@ -841,6 +990,32 @@ mod tests {
         });
 
         pretty_assertions::assert_eq!(expect, cx.display_text());
+    }
+
+    #[test]
+    fn test_classify_line() {
+        assert_eq!(classify_line("Error: boom"), Some(Severity::Error));
+        assert_eq!(classify_line("  warning: x"), Some(Severity::Warning));
+        assert_eq!(classify_line("✗ failed"), Some(Severity::Error));
+        assert_eq!(classify_line("⚠ heads up"), Some(Severity::Warning));
+        assert_eq!(classify_line("normal log"), None);
+        // "errors happen" starts with "errors", not the word "error" (no ':' or
+        // whitespace immediately after "error"), so it must not match.
+        assert_eq!(classify_line("errors happen"), None);
+    }
+
+    #[test]
+    fn test_severity_for_event() {
+        // Stderr forces Error even for an otherwise unremarkable line.
+        assert_eq!(
+            severity_for_event(Some(&OutputEventCategory::Stderr), "just some text"),
+            Some(Severity::Error)
+        );
+        assert_eq!(
+            severity_for_event(Some(&OutputEventCategory::Stdout), "Error: boom"),
+            Some(Severity::Error)
+        );
+        assert_eq!(severity_for_event(None, "normal log"), None);
     }
 
     #[gpui::test]

@@ -357,6 +357,153 @@ async fn test_escape_code_processing(executor: BackgroundExecutor, cx: &mut Test
         .unwrap();
 }
 
+/// End-to-end check that severity coloring actually reaches the editor's text
+/// highlights for plain (non-ANSI) output. `parse_ansi_text` always emits at
+/// least one foreground span for non-empty text (with `color: None` when there
+/// is no SGR color code), so gating severity coloring on "no foreground spans"
+/// would silently never fire for real output -- this test would fail if that
+/// regressed.
+#[gpui::test]
+async fn test_severity_highlighting_for_plain_output(
+    executor: BackgroundExecutor,
+    cx: &mut TestAppContext,
+) {
+    init_test(cx);
+
+    let fs = FakeFs::new(executor.clone());
+
+    fs.insert_tree(
+        path!("/project"),
+        json!({
+            "main.rs": "First line\nSecond line\nThird line\nFourth line",
+        }),
+    )
+    .await;
+
+    let project = Project::test(fs, [path!("/project").as_ref()], cx).await;
+    let workspace = init_test_workspace(&project, cx).await;
+    let cx = &mut VisualTestContext::from_window(*workspace, cx);
+    workspace
+        .update(cx, |workspace, window, cx| {
+            workspace.focus_panel::<DebugPanel>(window, cx);
+        })
+        .unwrap();
+
+    let session = start_debug_session(&workspace, cx, |_| {}).unwrap();
+    let client = session.read_with(cx, |session, _| session.adapter_client().unwrap());
+
+    client.on_request::<StackTrace, _>(move |_, _| {
+        Ok(dap::StackTraceResponse {
+            stack_frames: Vec::default(),
+            total_frames: None,
+        })
+    });
+
+    // No severity marker: should not be highlighted.
+    client
+        .fake_event(dap::messages::Events::Output(dap::OutputEvent {
+            category: Some(dap::OutputEventCategory::Stdout),
+            output: "normal log line".to_string(),
+            data: None,
+            variables_reference: None,
+            source: None,
+            line: None,
+            column: None,
+            group: None,
+            location_reference: None,
+        }))
+        .await;
+
+    // Stderr forces Error coloring even without any content marker.
+    client
+        .fake_event(dap::messages::Events::Output(dap::OutputEvent {
+            category: Some(dap::OutputEventCategory::Stderr),
+            output: "boom from stderr".to_string(),
+            data: None,
+            variables_reference: None,
+            source: None,
+            line: None,
+            column: None,
+            group: None,
+            location_reference: None,
+        }))
+        .await;
+
+    // Content marker on stdout: leading "Error" triggers Error coloring.
+    client
+        .fake_event(dap::messages::Events::Output(dap::OutputEvent {
+            category: Some(dap::OutputEventCategory::Stdout),
+            output: "Error: parse failed".to_string(),
+            data: None,
+            variables_reference: None,
+            source: None,
+            line: None,
+            column: None,
+            group: None,
+            location_reference: None,
+        }))
+        .await;
+
+    cx.run_until_parked();
+
+    let _running_state =
+        active_debug_session_panel(workspace, cx).update_in(cx, |item, window, cx| {
+            cx.focus_self(window);
+            item.running_state().update(cx, |this, cx| {
+                this.console()
+                    .update(cx, |this, cx| this.update_output(window, cx));
+            });
+
+            item.running_state().clone()
+        });
+
+    cx.run_until_parked();
+
+    workspace
+        .update(cx, |workspace, window, cx| {
+            let debug_panel = workspace.panel::<DebugPanel>(cx).unwrap();
+            let active_debug_session_panel = debug_panel
+                .update(cx, |this, _| this.active_session())
+                .unwrap();
+
+            let editor = active_debug_session_panel
+                .read(cx)
+                .running_state()
+                .read(cx)
+                .console()
+                .read(cx)
+                .editor()
+                .clone();
+
+            assert_eq!(
+                "normal log line\nboom from stderr\nError: parse failed\n",
+                editor.read(cx).text(cx).as_str()
+            );
+
+            let mut text_highlights = editor.update(cx, |editor, cx| {
+                editor
+                    .all_text_highlights(window, cx)
+                    .into_iter()
+                    .flat_map(|(_, ranges)| ranges)
+                    .collect::<Vec<_>>()
+            });
+            text_highlights.sort_by_key(|hl| hl.start);
+
+            // Row 0 ("normal log line") carries no severity marker and must not be
+            // highlighted. Row 1 ("boom from stderr") is highlighted end-to-end
+            // because its category is Stderr. Row 2 ("Error: parse failed") is
+            // highlighted because it starts with the "Error" marker.
+            pretty_assertions::assert_eq!(
+                text_highlights,
+                [
+                    DisplayPoint::new(DisplayRow(1), 0)..DisplayPoint::new(DisplayRow(1), 16),
+                    DisplayPoint::new(DisplayRow(2), 0)..DisplayPoint::new(DisplayRow(2), 19),
+                ]
+            );
+        })
+        .unwrap();
+}
+
 // #[gpui::test]
 // async fn test_grouped_output(executor: BackgroundExecutor, cx: &mut TestAppContext) {
 //     init_test(cx);
